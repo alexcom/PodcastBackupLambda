@@ -71,10 +71,12 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 	sb := strings.Builder{}
 	if len(failures) > 0 {
 		sb.WriteString("Failures:\n")
-		sb.WriteString(strings.Join(failures, "\n"))
-		sb.WriteByte('\n')
+		for _, f := range failures {
+			sb.WriteString(f)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n\n")
 	}
-	sb.WriteString("\n")
 	if len(successes) > 0 {
 		sb.WriteString("Successfully backed up : \n")
 		for _, s := range successes {
