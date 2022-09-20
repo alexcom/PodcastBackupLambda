@@ -1,2 +1,2 @@
 # PodcastBackupLambda
-Simple Golang lambda for backing up media files from RSS feed
+Simple Golang lambda for backing up media files from RSS feed to Mega
