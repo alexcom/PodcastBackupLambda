@@ -273,7 +273,7 @@ type Archive struct {
 }
 
 func (a *Archive) Append(filename, podcast string) {
-	fmt.Printf(`adding "%s" to podcast "%s" archive\n`, filename, podcast)
+	fmt.Printf("adding \"%s\" to podcast \"%s\" archive\n", filename, podcast)
 	input := &dynamodb.PutItemInput{}
 	input.SetTableName(a.table)
 	input.SetItem(map[string]*dynamodb.AttributeValue{
