@@ -29,13 +29,6 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	links, err := fetchFeed(event.FeedURL)
-	if err != nil {
-		return "failure", err
-	}
-
-	var failures []string
-	var successes []string
 	destDir := event.TargetDirectory
 	fmt.Println("destination location : ", destDir)
 	pathNodes, err := meg.ResolvePathOnMega(m, destDir)
@@ -43,6 +36,28 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 		return "", fmt.Errorf("path Lookup failed: %w", err)
 	}
 	destNode := pathNodes[len(pathNodes)-1]
+
+	links, err := processFeed(event.FeedURL)
+	if err != nil {
+		return "failure", err
+	}
+
+	successes, failures := processLinks(links, destNode, m)
+
+	if len(successes) == 0 {
+		fmt.Println("no files were backed up")
+	}
+
+	message := makeMessage(failures, successes)
+	fmt.Println(message)
+
+	if len(message) > 0 {
+		sendEmailNotification(message)
+	}
+	return message, nil
+}
+
+func processLinks(links []string, destNode *mega.Node, m *mega.Mega) (successes []string, failures []string) {
 	for _, podcastLink := range links {
 		filename := podcastLink[strings.LastIndex(podcastLink, "/")+1:]
 		fmt.Println("filename : ", filename)
@@ -68,6 +83,10 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 		}
 		_ = os.Remove(tempFilePath)
 	}
+	return successes, failures
+}
+
+func makeMessage(failures []string, successes []string) string {
 	sb := strings.Builder{}
 	if len(failures) > 0 {
 		sb.WriteString("Failures:\n")
@@ -83,14 +102,8 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 			sb.WriteString(s)
 			sb.WriteString("\n")
 		}
-	} else {
-		fmt.Println("no files were backed up")
 	}
-	fmt.Println(sb.String())
-	if sb.Len() > 0 {
-		sendEmailNotification(sb.String())
-	}
-	return sb.String(), nil
+	return sb.String()
 }
 
 func downloadMediaToTempFile(podcastLink string) (filename string, err error) {
@@ -132,7 +145,7 @@ func createMega() (*mega.Mega, error) {
 	return m, nil
 }
 
-func fetchFeed(feedURL string) ([]string, error) {
+func processFeed(feedURL string) ([]string, error) {
 	fmt.Println("Refreshing feed", feedURL)
 	client := http.Client{}
 	resp, err := client.Get(feedURL)
