@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/t3rm1n4l/go-mega"
 	"io"
@@ -22,12 +23,18 @@ import (
 type PodcastEvent struct {
 	FeedURL         string `json:"feed_url"`
 	TargetDirectory string `json:"target_directory"`
+	Podcast         string `json:"podcast"`
 }
 
 func Handle(ctx context.Context, event PodcastEvent) (string, error) {
+	archive, err := NewArchive(os.Getenv("ARCHIVE_TABLE"))
+	if err != nil {
+		return "error creating archive", err
+	}
+
 	m, err := createMega()
 	if err != nil {
-		return "", err
+		return "error creating mega client", err
 	}
 	destDir := event.TargetDirectory
 	fmt.Println("destination location : ", destDir)
@@ -42,7 +49,7 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 		return "failure", err
 	}
 
-	successes, failures := processLinks(links, destNode, m)
+	successes, failures := processLinks(event.Podcast, links, destNode, m, archive)
 
 	if len(successes) == 0 {
 		fmt.Println("no files were backed up")
@@ -57,12 +64,12 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 	return message, nil
 }
 
-func processLinks(links []string, destNode *mega.Node, m *mega.Mega) (successes []string, failures []string) {
+func processLinks(podcast string, links []string, destNode *mega.Node, m *mega.Mega, archive *Archive) (successes []string, failures []string) {
 	for _, podcastLink := range links {
 		filename := podcastLink[strings.LastIndex(podcastLink, "/")+1:]
 		fmt.Println("filename : ", filename)
 
-		if exists, err := meg.CheckExists(m, destNode, filename); err == nil {
+		if exists, err := archive.Exists(filename, podcast); err == nil {
 			if exists {
 				fmt.Printf("file %s already exists, skipping\n", filename)
 				continue
@@ -80,6 +87,7 @@ func processLinks(links []string, destNode *mega.Node, m *mega.Mega) (successes 
 			failures = append(failures, err.Error())
 		} else {
 			successes = append(successes, filename)
+			archive.Append(filename, podcast)
 		}
 		_ = os.Remove(tempFilePath)
 	}
@@ -247,9 +255,60 @@ func sendEmailNotification(textBody string) {
 	fmt.Println(output)
 }
 
+func NewArchive(table string) (*Archive, error) {
+	region := os.Getenv("AWS_REGION")
+	config := aws.NewConfig()
+	config.Region = aws.String(region)
+	s, err := session.NewSession(config)
+	if err != nil {
+		return nil, err
+	}
+	client := dynamodb.New(s)
+	return &Archive{client, table}, nil
+}
+
+type Archive struct {
+	dynamodb *dynamodb.DynamoDB
+	table    string
+}
+
+func (a *Archive) Append(filename, podcast string) {
+	fmt.Printf(`adding "%s" to podcast "%s" archive\n`, filename, podcast)
+	input := &dynamodb.PutItemInput{}
+	input.SetTableName(a.table)
+	input.SetItem(map[string]*dynamodb.AttributeValue{
+		"filename": {
+			S: aws.String(filename),
+		},
+		"podcast": {
+			S: aws.String(podcast),
+		},
+	})
+
+	_, err := a.dynamodb.PutItem(input)
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
+func (a *Archive) Exists(filename, podcast string) (bool, error) {
+	input := &dynamodb.GetItemInput{}
+	input.SetTableName(a.table)
+	input.SetKey(map[string]*dynamodb.AttributeValue{
+		"filename": {
+			S: aws.String(filename),
+		},
+	})
+	item, err := a.dynamodb.GetItem(input)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return err == nil && item != nil && item.Item != nil, err
+}
+
 func main() {
 	if os.Getenv("LOCAL_DEBUG") == "true" {
-		_, err := Handle(nil, PodcastEvent{FeedURL: "https://feeds.feedburner.com/HollywoodBabbleOnPod", TargetDirectory: "HollywoodBabbleOnBackup"})
+		_, err := Handle(nil, PodcastEvent{FeedURL: "https://feeds.feedburner.com/HollywoodBabbleOnPod", TargetDirectory: "HollywoodBabbleOnBackup", Podcast: "Hollywood Babble-On"})
 		if err != nil {
 			println(err.Error())
 		}
