@@ -83,9 +83,10 @@ func Handle(ctx context.Context, event PodcastEvent) (string, error) {
 			sb.WriteString(s)
 			sb.WriteString("\n")
 		}
+	} else {
+		fmt.Println("no files were backed up")
 	}
 	fmt.Println(sb.String())
-	fmt.Println("no files were backed up")
 	if sb.Len() > 0 {
 		sendEmailNotification(sb.String())
 	}
