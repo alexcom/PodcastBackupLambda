@@ -7,10 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/t3rm1n4l/go-mega"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -24,63 +20,69 @@ type PodcastEvent struct {
 	Podcast         string `json:"podcast"`
 }
 
-func Handle(ctx context.Context, event PodcastEvent) (string, error) {
+func Handle(ctx context.Context, event PodcastEvent) (response string, err error) {
 	archive, err := NewArchive(os.Getenv("ARCHIVE_TABLE"))
 	if err != nil {
 		return "error creating archive", err
 	}
+	email := os.Getenv("MEGA_EMAIL")
+	password := os.Getenv("MEGA_PASSWORD")
 
-	m, err := createMega()
+	megaClient, err := meg.NewMegaClient(email, password)
 	if err != nil {
 		return "error creating mega client", err
 	}
 	destDir := event.TargetDirectory
 	fmt.Println("destination location : ", destDir)
-	pathNodes, err := meg.ResolvePathOnMega(m, destDir)
+	err = megaClient.ChDir(destDir)
 	if err != nil {
 		return "", fmt.Errorf("path Lookup failed: %w", err)
 	}
-	destNode := pathNodes[len(pathNodes)-1]
 
 	links, err := processFeed(event.FeedURL)
 	if err != nil {
 		return "failure", err
 	}
 
-	successes, failures := processLinks(event.Podcast, links, destNode, m, archive)
+	successes, failures := processLinks(event.Podcast, links, megaClient, archive)
 
 	if len(successes) == 0 {
 		fmt.Println("no files were backed up")
 	}
 
+	return report(failures, successes), nil
+}
+
+func report(failures []string, successes []string) string {
 	message := makeMessage(failures, successes)
 	fmt.Println(message)
 
 	if len(message) > 0 {
 		sendEmailNotification(message)
 	}
-	return message, nil
+	return message
 }
 
-func processLinks(podcast string, links []string, destNode *mega.Node, m *mega.Mega, archive *Archive) (successes []string, failures []string) {
+func processLinks(podcast string, links []string, megaClient *meg.MegaClient, archive *Archive) (successes []string, failures []string) {
 	for _, podcastLink := range links {
 		filename := podcastLink[strings.LastIndex(podcastLink, "/")+1:]
 		fmt.Println("filename : ", filename)
 
 		if exists, err := archive.Exists(filename, podcast); err == nil {
 			if exists {
-				fmt.Printf("file %s already exists, skipping\n", filename)
+				fmt.Printf("file %s recorded in archive, skipping\n", filename)
 				continue
 			}
 		} else {
 			fmt.Printf("error checking file %s for existense, skipping: %s\n", filename, err)
+			failures = append(failures, err.Error())
 			continue
 		}
 
 		tempFilePath, err := downloadMediaToTempFile(podcastLink)
 		fmt.Println("source temp file path : ", tempFilePath)
 
-		err = meg.UploadToMega(m, destNode, tempFilePath, filename)
+		err = megaClient.Upload(tempFilePath, filename)
 		if err != nil {
 			failures = append(failures, err.Error())
 		} else {
@@ -137,20 +139,6 @@ func downloadMediaToTempFile(podcastLink string) (filename string, err error) {
 	return tempFile.Name(), nil
 }
 
-func createMega() (*mega.Mega, error) {
-	email := os.Getenv("MEGA_EMAIL")
-	password := os.Getenv("MEGA_PASSWORD")
-	if email == "" || password == "" {
-		return nil, errors.New("username or password empty. set env MEGA_EMAIL & MEGA_PASSWORD")
-	}
-	m := mega.New()
-	err := m.Login(email, password)
-	if err != nil {
-		return nil, fmt.Errorf("login failed : %w", err)
-	}
-	return m, nil
-}
-
 func processFeed(feedURL string) ([]string, error) {
 	fmt.Println("Refreshing feed", feedURL)
 	client := http.Client{}
@@ -204,57 +192,6 @@ func sendEmailNotification(textBody string) {
 	//subject := "PodcastBackup notification"
 	//fmt.Println("Email Sent to address: " + email)
 	fmt.Println("NOT SENDING eMailto address : " + email + ". Reason: unimplemented")
-}
-
-func NewArchive(table string) (*Archive, error) {
-	region := os.Getenv("AWS_REGION")
-	config := aws.NewConfig()
-	config.Region = aws.String(region)
-	s, err := session.NewSession(config)
-	if err != nil {
-		return nil, err
-	}
-	client := dynamodb.New(s)
-	return &Archive{client, table}, nil
-}
-
-type Archive struct {
-	dynamodb *dynamodb.DynamoDB
-	table    string
-}
-
-func (a *Archive) Append(filename, podcast string) {
-	fmt.Printf("adding \"%s\" to podcast \"%s\" archive\n", filename, podcast)
-	input := &dynamodb.PutItemInput{}
-	input.SetTableName(a.table)
-	input.SetItem(map[string]*dynamodb.AttributeValue{
-		"filename": {
-			S: aws.String(filename),
-		},
-		"podcast": {
-			S: aws.String(podcast),
-		},
-	})
-
-	_, err := a.dynamodb.PutItem(input)
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-
-func (a *Archive) Exists(filename, podcast string) (bool, error) {
-	input := &dynamodb.GetItemInput{}
-	input.SetTableName(a.table)
-	input.SetKey(map[string]*dynamodb.AttributeValue{
-		"filename": {
-			S: aws.String(filename),
-		},
-	})
-	item, err := a.dynamodb.GetItem(input)
-	if err != nil {
-		fmt.Println(err)
-	}
-	return err == nil && item != nil && item.Item != nil, err
 }
 
 func main() {
