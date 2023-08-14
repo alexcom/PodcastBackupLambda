@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/t3rm1n4l/go-mega"
 	"io"
 	"io/ioutil"
@@ -203,56 +201,9 @@ type RSS struct {
 
 func sendEmailNotification(textBody string) {
 	email := os.Getenv("NOTIFICATION_EMAIL")
-	awsSesZone := os.Getenv("AWS_SES_ZONE")
-	subject := "PodcastBackup notification"
-	s, err := session.NewSession(&aws.Config{Region: aws.String(awsSesZone)})
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	svc := ses.New(s)
-	const encoding = "UTF-8"
-	input := &ses.SendEmailInput{
-		Destination: &ses.Destination{
-			ToAddresses: []*string{
-				aws.String(email),
-			}},
-		Message: &ses.Message{
-			Body: &ses.Body{
-				Text: &ses.Content{
-					Charset: aws.String(encoding),
-					Data:    aws.String(textBody),
-				},
-			},
-			Subject: &ses.Content{
-				Charset: aws.String(encoding),
-				Data:    aws.String(subject),
-			},
-		},
-		Source: aws.String(email),
-	}
-	output, err := svc.SendEmail(input)
-	// error handling copied from AWS SES examples
-	// Display error messages if they occur.
-	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case ses.ErrCodeMessageRejected:
-				fmt.Println(ses.ErrCodeMessageRejected, aerr.Error())
-			case ses.ErrCodeMailFromDomainNotVerifiedException:
-				fmt.Println(ses.ErrCodeMailFromDomainNotVerifiedException, aerr.Error())
-			case ses.ErrCodeConfigurationSetDoesNotExistException:
-				fmt.Println(ses.ErrCodeConfigurationSetDoesNotExistException, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			fmt.Println(err.Error())
-		}
-		return
-	}
-	fmt.Println("Email Sent to address: " + email)
-	fmt.Println(output)
+	//subject := "PodcastBackup notification"
+	//fmt.Println("Email Sent to address: " + email)
+	fmt.Println("NOT SENDING eMailto address : " + email + ". Reason: unimplemented")
 }
 
 func NewArchive(table string) (*Archive, error) {
