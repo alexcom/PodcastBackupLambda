@@ -9,7 +9,9 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -58,7 +60,7 @@ func report(failures []string, successes []string) string {
 	fmt.Println(message)
 
 	if len(message) > 0 {
-		sendEmailNotification(message)
+		sendTelegramNotification(message)
 	}
 	return message
 }
@@ -187,11 +189,19 @@ type RSS struct {
 	} `xml:"channel"`
 }
 
-func sendEmailNotification(textBody string) {
-	email := os.Getenv("NOTIFICATION_EMAIL")
-	//subject := "PodcastBackup notification"
-	//fmt.Println("Email Sent to address: " + email)
-	fmt.Println("NOT SENDING eMailto address : " + email + ". Reason: unimplemented")
+func sendTelegramNotification(textBody string) {
+	TgToken := os.Getenv("TG_TOKEN")
+	ChatID := os.Getenv("TG_CHAT_ID")
+	apiURL := "https://api.telegram.org/bot" + TgToken + "/sendMessage"
+	params := url.Values{}
+	params.Set("chat_id", ChatID)
+	params.Set("text", textBody)
+
+	resp, err := http.PostForm(apiURL, params)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
 }
 
 func main() {
